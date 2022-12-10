@@ -1,0 +1,24 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentParameters.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "factoryName": {
+            "value": "beast-adf"
+        },
+        "ADLS_LS_accountKey": {
+            "value": ""
+        },
+        "Azure_SQL_DB_LS_connectionString": {
+            "value": ""
+        },
+        "Every_Day_properties_ADF_Assn_1_parameters_schemaName": {
+            "value": "saleslt"
+        },
+        "Every_Day_properties_ADF_Assn_1_parameters_tableName": {
+            "value": "customer"
+        },
+        "ADLS_LS_properties_typeProperties_url": {
+            "value": "https://beaststg.dfs.core.windows.net/"
+        }
+    }
+}

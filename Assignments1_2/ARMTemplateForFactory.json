@@ -1,0 +1,575 @@
+{
+    "$schema": "http://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "factoryName": {
+            "type": "string",
+            "metadata": "Data Factory name",
+            "defaultValue": "beast-adf"
+        },
+        "ADLS_LS_accountKey": {
+            "type": "secureString",
+            "metadata": "Secure string for 'accountKey' of 'ADLS_LS'"
+        },
+        "Azure_SQL_DB_LS_connectionString": {
+            "type": "secureString",
+            "metadata": "Secure string for 'connectionString' of 'Azure_SQL_DB_LS'"
+        },
+        "Every_Day_properties_ADF_Assn_1_parameters_schemaName": {
+            "type": "string",
+            "defaultValue": "saleslt"
+        },
+        "Every_Day_properties_ADF_Assn_1_parameters_tableName": {
+            "type": "string",
+            "defaultValue": "customer"
+        },
+        "ADLS_LS_properties_typeProperties_url": {
+            "type": "string",
+            "defaultValue": "https://beaststg.dfs.core.windows.net/"
+        }
+    },
+    "variables": {
+        "factoryId": "[concat('Microsoft.DataFactory/factories/', parameters('factoryName'))]"
+    },
+    "resources": [
+        {
+            "name": "[concat(parameters('factoryName'), '/ADLS_CSV_DS')]",
+            "type": "Microsoft.DataFactory/factories/datasets",
+            "apiVersion": "2018-06-01",
+            "properties": {
+                "linkedServiceName": {
+                    "referenceName": "ADLS_LS",
+                    "type": "LinkedServiceReference"
+                },
+                "parameters": {
+                    "folderName": {
+                        "type": "String"
+                    },
+                    "fileName": {
+                        "type": "String"
+                    }
+                },
+                "annotations": [],
+                "type": "DelimitedText",
+                "typeProperties": {
+                    "location": {
+                        "type": "AzureBlobFSLocation",
+                        "fileName": {
+                            "value": "@dataset().fileName",
+                            "type": "Expression"
+                        },
+                        "folderPath": {
+                            "value": "@dataset().folderName",
+                            "type": "Expression"
+                        },
+                        "fileSystem": "landing"
+                    },
+                    "columnDelimiter": ",",
+                    "escapeChar": "\\",
+                    "firstRowAsHeader": true,
+                    "quoteChar": "\""
+                },
+                "schema": []
+            },
+            "dependsOn": [
+                "[concat(variables('factoryId'), '/linkedServices/ADLS_LS')]"
+            ]
+        },
+        {
+            "name": "[concat(parameters('factoryName'), '/Azure_SQL_DB_DS')]",
+            "type": "Microsoft.DataFactory/factories/datasets",
+            "apiVersion": "2018-06-01",
+            "properties": {
+                "linkedServiceName": {
+                    "referenceName": "Azure_SQL_DB_LS",
+                    "type": "LinkedServiceReference",
+                    "parameters": {
+                        "dbEndpoint": {
+                            "value": "@dataset().dbEndpoint",
+                            "type": "Expression"
+                        },
+                        "dbName": {
+                            "value": "@dataset().dbName",
+                            "type": "Expression"
+                        }
+                    }
+                },
+                "parameters": {
+                    "schemaName": {
+                        "type": "string"
+                    },
+                    "tableName": {
+                        "type": "string"
+                    },
+                    "dbEndpoint": {
+                        "type": "string"
+                    },
+                    "dbName": {
+                        "type": "string"
+                    }
+                },
+                "annotations": [],
+                "type": "AzureSqlTable",
+                "schema": [],
+                "typeProperties": {
+                    "schema": {
+                        "value": "@dataset().schemaName",
+                        "type": "Expression"
+                    },
+                    "table": {
+                        "value": "@dataset().tableName",
+                        "type": "Expression"
+                    }
+                }
+            },
+            "dependsOn": [
+                "[concat(variables('factoryId'), '/linkedServices/Azure_SQL_DB_LS')]"
+            ]
+        },
+        {
+            "name": "[concat(parameters('factoryName'), '/ADF_Assn_1')]",
+            "type": "Microsoft.DataFactory/factories/pipelines",
+            "apiVersion": "2018-06-01",
+            "properties": {
+                "description": "ADF Assignment Scenario 1",
+                "activities": [
+                    {
+                        "name": "Copy Incremental Data",
+                        "description": "Copy data from saleslt.customer incrementally",
+                        "type": "Copy",
+                        "dependsOn": [
+                            {
+                                "activity": "Get Max ModifiedDate value",
+                                "dependencyConditions": [
+                                    "Succeeded"
+                                ]
+                            }
+                        ],
+                        "policy": {
+                            "timeout": "0.12:00:00",
+                            "retry": 0,
+                            "retryIntervalInSeconds": 30,
+                            "secureOutput": false,
+                            "secureInput": false
+                        },
+                        "userProperties": [],
+                        "typeProperties": {
+                            "source": {
+                                "type": "AzureSqlSource",
+                                "sqlReaderQuery": {
+                                    "value": "@concat(\n    'select * from ',\n    pipeline().parameters.schemaName, '.',\n    pipeline().parameters.tableName,\n    ' where modifieddate > ''',\n    activity('Get Highwatermark Timestamp').output.firstRow.highwatermark_ts,\n    ''' and modifieddate <= ''',\n    activity('Get Max ModifiedDate value').output.firstRow.max_modified_dt,\n    ''''\n)",
+                                    "type": "Expression"
+                                },
+                                "queryTimeout": "02:00:00",
+                                "partitionOption": "None"
+                            },
+                            "sink": {
+                                "type": "DelimitedTextSink",
+                                "storeSettings": {
+                                    "type": "AzureBlobFSWriteSettings"
+                                },
+                                "formatSettings": {
+                                    "type": "DelimitedTextWriteSettings",
+                                    "quoteAllText": true,
+                                    "fileExtension": ".txt"
+                                }
+                            },
+                            "enableStaging": false,
+                            "dataIntegrationUnits": 2,
+                            "translator": {
+                                "type": "TabularTranslator",
+                                "typeConversion": true,
+                                "typeConversionSettings": {
+                                    "allowDataTruncation": true,
+                                    "treatBooleanAsNumber": false
+                                }
+                            }
+                        },
+                        "inputs": [
+                            {
+                                "referenceName": "Azure_SQL_DB_DS",
+                                "type": "DatasetReference",
+                                "parameters": {
+                                    "schemaName": {
+                                        "value": "@pipeline().parameters.schemaName",
+                                        "type": "Expression"
+                                    },
+                                    "tableName": {
+                                        "value": "@pipeline().parameters.tableName",
+                                        "type": "Expression"
+                                    },
+                                    "dbEndpoint": {
+                                        "value": "@pipeline().globalParameters.dbEndpoint",
+                                        "type": "Expression"
+                                    },
+                                    "dbName": {
+                                        "value": "@pipeline().globalParameters.dbName",
+                                        "type": "Expression"
+                                    }
+                                }
+                            }
+                        ],
+                        "outputs": [
+                            {
+                                "referenceName": "ADLS_CSV_DS",
+                                "type": "DatasetReference",
+                                "parameters": {
+                                    "folderName": "assignment_2_data",
+                                    "fileName": {
+                                        "value": "@concat(\n    toUpper(pipeline().parameters.tableName),\n    '_incremental_',\n    utcnow(),\n    '.csv'\n)",
+                                        "type": "Expression"
+                                    }
+                                }
+                            }
+                        ]
+                    },
+                    {
+                        "name": "Get Highwatermark Timestamp",
+                        "description": "Get Highwatermark Timestamp",
+                        "type": "Lookup",
+                        "dependsOn": [],
+                        "policy": {
+                            "timeout": "0.12:00:00",
+                            "retry": 0,
+                            "retryIntervalInSeconds": 30,
+                            "secureOutput": false,
+                            "secureInput": false
+                        },
+                        "userProperties": [],
+                        "typeProperties": {
+                            "source": {
+                                "type": "AzureSqlSource",
+                                "sqlReaderQuery": {
+                                    "value": "select highwatermark_ts\nfrom dbo.highwatermark_table\nwhere lower(table_name) = '@{toUpper(\n        concat(\n            pipeline().parameters.schemaName,\n            '.',\n            pipeline().parameters.tableName\n        )\n    )}'",
+                                    "type": "Expression"
+                                },
+                                "queryTimeout": "02:00:00",
+                                "partitionOption": "None"
+                            },
+                            "dataset": {
+                                "referenceName": "Azure_SQL_DB_DS",
+                                "type": "DatasetReference",
+                                "parameters": {
+                                    "schemaName": {
+                                        "value": "@pipeline().parameters.schemaName",
+                                        "type": "Expression"
+                                    },
+                                    "tableName": {
+                                        "value": "@pipeline().parameters.tableName",
+                                        "type": "Expression"
+                                    },
+                                    "dbEndpoint": {
+                                        "value": "@pipeline().globalParameters.dbEndpoint",
+                                        "type": "Expression"
+                                    },
+                                    "dbName": {
+                                        "value": "@pipeline().globalParameters.dbName",
+                                        "type": "Expression"
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    {
+                        "name": "Get Max ModifiedDate value",
+                        "description": "Get Max ModifiedDate value",
+                        "type": "Lookup",
+                        "dependsOn": [
+                            {
+                                "activity": "Get Highwatermark Timestamp",
+                                "dependencyConditions": [
+                                    "Succeeded"
+                                ]
+                            }
+                        ],
+                        "policy": {
+                            "timeout": "0.12:00:00",
+                            "retry": 0,
+                            "retryIntervalInSeconds": 30,
+                            "secureOutput": false,
+                            "secureInput": false
+                        },
+                        "userProperties": [],
+                        "typeProperties": {
+                            "source": {
+                                "type": "AzureSqlSource",
+                                "sqlReaderQuery": {
+                                    "value": "@concat(\n    'select max(modifieddate) as max_modified_dt from ',\n    pipeline().parameters.schemaName, '.',\n    pipeline().parameters.tableName\n)",
+                                    "type": "Expression"
+                                },
+                                "queryTimeout": "02:00:00",
+                                "partitionOption": "None"
+                            },
+                            "dataset": {
+                                "referenceName": "Azure_SQL_DB_DS",
+                                "type": "DatasetReference",
+                                "parameters": {
+                                    "schemaName": {
+                                        "value": "@pipeline().parameters.schemaName",
+                                        "type": "Expression"
+                                    },
+                                    "tableName": {
+                                        "value": "@pipeline().parameters.tableName",
+                                        "type": "Expression"
+                                    },
+                                    "dbEndpoint": {
+                                        "value": "@pipeline().globalParameters.dbEndpoint",
+                                        "type": "Expression"
+                                    },
+                                    "dbName": {
+                                        "value": "@pipeline().globalParameters.dbName",
+                                        "type": "Expression"
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    {
+                        "name": "Update Highwatermark Timestamp",
+                        "description": "Update Highwatermark Timestamp",
+                        "type": "Copy",
+                        "dependsOn": [
+                            {
+                                "activity": "Copy Incremental Data",
+                                "dependencyConditions": [
+                                    "Succeeded"
+                                ]
+                            }
+                        ],
+                        "policy": {
+                            "timeout": "0.12:00:00",
+                            "retry": 0,
+                            "retryIntervalInSeconds": 30,
+                            "secureOutput": false,
+                            "secureInput": false
+                        },
+                        "userProperties": [],
+                        "typeProperties": {
+                            "source": {
+                                "type": "AzureSqlSource",
+                                "sqlReaderQuery": {
+                                    "value": "SELECT\n    UPPER('@{pipeline().parameters.schemaName}.@{pipeline().parameters.tableName}')\n    AS table_name,\n    '@{activity('Get Max ModifiedDate value').output.firstRow.max_modified_dt}'\n    AS highwatermark_ts",
+                                    "type": "Expression"
+                                },
+                                "queryTimeout": "02:00:00",
+                                "partitionOption": "None"
+                            },
+                            "sink": {
+                                "type": "AzureSqlSink",
+                                "writeBehavior": "upsert",
+                                "upsertSettings": {
+                                    "useTempDB": true,
+                                    "keys": [
+                                        "table_name"
+                                    ]
+                                },
+                                "sqlWriterUseTableLock": false,
+                                "disableMetricsCollection": false
+                            },
+                            "enableStaging": false,
+                            "dataIntegrationUnits": 2,
+                            "translator": {
+                                "type": "TabularTranslator",
+                                "typeConversion": true,
+                                "typeConversionSettings": {
+                                    "allowDataTruncation": true,
+                                    "treatBooleanAsNumber": false
+                                }
+                            }
+                        },
+                        "inputs": [
+                            {
+                                "referenceName": "Azure_SQL_DB_DS",
+                                "type": "DatasetReference",
+                                "parameters": {
+                                    "schemaName": "dbo",
+                                    "tableName": "highwatermark_table",
+                                    "dbEndpoint": {
+                                        "value": "@pipeline().globalParameters.dbEndpoint",
+                                        "type": "Expression"
+                                    },
+                                    "dbName": {
+                                        "value": "@pipeline().globalParameters.dbName",
+                                        "type": "Expression"
+                                    }
+                                }
+                            }
+                        ],
+                        "outputs": [
+                            {
+                                "referenceName": "Azure_SQL_DB_DS",
+                                "type": "DatasetReference",
+                                "parameters": {
+                                    "schemaName": "dbo",
+                                    "tableName": "highwatermark_table",
+                                    "dbEndpoint": {
+                                        "value": "@pipeline().globalParameters.dbEndpoint",
+                                        "type": "Expression"
+                                    },
+                                    "dbName": {
+                                        "value": "@pipeline().globalParameters.dbName",
+                                        "type": "Expression"
+                                    }
+                                }
+                            }
+                        ]
+                    }
+                ],
+                "policy": {
+                    "elapsedTimeMetric": {},
+                    "cancelAfter": {}
+                },
+                "parameters": {
+                    "schemaName": {
+                        "type": "string",
+                        "defaultValue": "saleslt"
+                    },
+                    "tableName": {
+                        "type": "string"
+                    }
+                },
+                "annotations": [],
+                "lastPublishTime": "2022-12-05T16:39:34Z"
+            },
+            "dependsOn": [
+                "[concat(variables('factoryId'), '/datasets/Azure_SQL_DB_DS')]",
+                "[concat(variables('factoryId'), '/datasets/ADLS_CSV_DS')]"
+            ]
+        },
+        {
+            "name": "[concat(parameters('factoryName'), '/Every_Day')]",
+            "type": "Microsoft.DataFactory/factories/triggers",
+            "apiVersion": "2018-06-01",
+            "properties": {
+                "description": "Trigger every day",
+                "annotations": [],
+                "runtimeState": "Stopped",
+                "pipelines": [
+                    {
+                        "pipelineReference": {
+                            "referenceName": "ADF_Assn_1",
+                            "type": "PipelineReference"
+                        },
+                        "parameters": {
+                            "schemaName": "[parameters('Every_Day_properties_ADF_Assn_1_parameters_schemaName')]",
+                            "tableName": "[parameters('Every_Day_properties_ADF_Assn_1_parameters_tableName')]"
+                        }
+                    },
+                    {
+                        "pipelineReference": {
+                            "referenceName": "ADF_Assn_2",
+                            "type": "PipelineReference"
+                        },
+                        "parameters": {}
+                    }
+                ],
+                "type": "ScheduleTrigger",
+                "typeProperties": {
+                    "recurrence": {
+                        "frequency": "Day",
+                        "interval": 1,
+                        "startTime": "2022-12-06T21:41:00Z",
+                        "timeZone": "UTC",
+                        "schedule": {}
+                    }
+                }
+            },
+            "dependsOn": [
+                "[concat(variables('factoryId'), '/pipelines/ADF_Assn_1')]",
+                "[concat(variables('factoryId'), '/pipelines/ADF_Assn_2')]"
+            ]
+        },
+        {
+            "name": "[concat(parameters('factoryName'), '/ADLS_LS')]",
+            "type": "Microsoft.DataFactory/factories/linkedServices",
+            "apiVersion": "2018-06-01",
+            "properties": {
+                "description": "Linked Service for Azure Data Lake Storage account",
+                "annotations": [],
+                "type": "AzureBlobFS",
+                "typeProperties": {
+                    "url": "[parameters('ADLS_LS_properties_typeProperties_url')]",
+                    "accountKey": {
+                        "type": "SecureString",
+                        "value": "[parameters('ADLS_LS_accountKey')]"
+                    }
+                }
+            },
+            "dependsOn": []
+        },
+        {
+            "name": "[concat(parameters('factoryName'), '/Azure_SQL_DB_LS')]",
+            "type": "Microsoft.DataFactory/factories/linkedServices",
+            "apiVersion": "2018-06-01",
+            "properties": {
+                "description": "Azure SQL Database Linked Service",
+                "parameters": {
+                    "dbEndpoint": {
+                        "type": "string"
+                    },
+                    "dbName": {
+                        "type": "string"
+                    }
+                },
+                "annotations": [],
+                "type": "AzureSqlDatabase",
+                "typeProperties": {
+                    "connectionString": "[parameters('Azure_SQL_DB_LS_connectionString')]"
+                }
+            },
+            "dependsOn": []
+        },
+        {
+            "name": "[concat(parameters('factoryName'), '/ADF_Assn_2')]",
+            "type": "Microsoft.DataFactory/factories/pipelines",
+            "apiVersion": "2018-06-01",
+            "properties": {
+                "description": "ADF Assignment Scenario 2",
+                "activities": [
+                    {
+                        "name": "Incremental_3_Tables",
+                        "type": "ForEach",
+                        "dependsOn": [],
+                        "userProperties": [],
+                        "typeProperties": {
+                            "items": {
+                                "value": "@createArray('Customer', 'Product', 'ProductCategory')",
+                                "type": "Expression"
+                            },
+                            "isSequential": false,
+                            "activities": [
+                                {
+                                    "name": "Execute Incremental Pipeline",
+                                    "type": "ExecutePipeline",
+                                    "dependsOn": [],
+                                    "userProperties": [],
+                                    "typeProperties": {
+                                        "pipeline": {
+                                            "referenceName": "ADF_Assn_1",
+                                            "type": "PipelineReference"
+                                        },
+                                        "waitOnCompletion": true,
+                                        "parameters": {
+                                            "tableName": {
+                                                "value": "@item()",
+                                                "type": "Expression"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                ],
+                "policy": {
+                    "elapsedTimeMetric": {},
+                    "cancelAfter": {}
+                },
+                "annotations": []
+            },
+            "dependsOn": [
+                "[concat(variables('factoryId'), '/pipelines/ADF_Assn_1')]"
+            ]
+        }
+    ]
+}

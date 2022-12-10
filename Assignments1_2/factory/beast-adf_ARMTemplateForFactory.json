@@ -1,0 +1,56 @@
+{
+    "$schema": "http://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "factoryName": {
+            "type": "string",
+            "metadata": "Data Factory name",
+            "defaultValue": "beast-adf"
+        },
+        "dataFactory_properties_globalParameters_dbEndpoint_value": {
+            "type": "string",
+            "defaultValue": "beast-sql-db-v101.database.windows.net"
+        },
+        "dataFactory_properties_globalParameters_dbName_value": {
+            "type": "string",
+            "defaultValue": "beast_sql_db"
+        },
+        "dataFactory_location": {
+            "type": "string",
+            "defaultValue": "eastus"
+        },
+        "dataFactory_identity_type": {
+            "type": "string",
+            "defaultValue": "SystemAssigned"
+        }
+    },
+    "variables": {
+        "factoryId": "[concat('Microsoft.DataFactory/factories/', parameters('factoryName'))]"
+    },
+    "resources": [
+        {
+            "name": "[parameters('factoryName')]",
+            "type": "Microsoft.DataFactory/factories",
+            "apiVersion": "2018-06-01",
+            "properties": {
+                "globalParameters": {
+                    "dbEndpoint": {
+                        "type": "string",
+                        "value": "[parameters('dataFactory_properties_globalParameters_dbEndpoint_value')]"
+                    },
+                    "dbName": {
+                        "type": "string",
+                        "value": "[parameters('dataFactory_properties_globalParameters_dbName_value')]"
+                    }
+                }
+            },
+            "dependsOn": [],
+            "location": "[parameters('dataFactory_location')]",
+            "identity": {
+                "type": "[parameters('dataFactory_identity_type')]",
+                "principalId": "30882f9c-9e16-45ec-814a-0304738d1e31",
+                "tenantId": "e86c4fe4-84f3-4d80-8b64-2970106b32e4"
+            }
+        }
+    ]
+}
